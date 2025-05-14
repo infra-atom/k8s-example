@@ -1,0 +1,165 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-nginx
+data:
+  default.conf.template: |
+    server {
+        listen 80;
+        server_name localhost;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html index.htm;
+
+            add_header Content-Type text/html;
+            sub_filter 'POD_NAME' '${POD_NAME}';
+            sub_filter_once on;
+        }
+
+        location = /_healthz {
+            add_header Content-Type text/plain;
+            return 200 'ok';
+        }
+
+        location = /app1 {
+            add_header Content-Type text/plain;
+            return 200 '<!DOCTYPE html><h2>This is APP#1</h2>\n';
+        }
+    }
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Welcome to Nginx</title>
+    </head>
+    <body>
+        <h1>Welcome to Nginx!</h1>
+        <p>If you see this page, the Nginx web server is successfully configured and basic auth is in use.</p>
+        <p>Learn more about deploying and managing applications with Kubernetes in our comprehensive Kubernetes course.</p>
+        <p>Pod Name: POD_NAME</p>
+    </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: app-nginx
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: app-nginx
+    spec:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: app-nginx
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: app-nginx
+      containers:
+        - name: nginx
+          image: nginx:1.27.5-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/nginx/templates/default.conf.template
+              subPath: default.conf.template
+            - name: config-volume
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+              readOnly: true
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /_healthz
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          startupProbe:
+            httpGet:
+              path: /
+              port: 80
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: config-volume
+          configMap:
+            name: app-nginx
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: app-nginx
+  minReplicas: 3
+  maxReplicas: 7
+  targetCPUUtilizationPercentage: 20
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: app-nginx-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: app-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-for-autoscale
+spec:
+  selector:
+    app: app-nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
