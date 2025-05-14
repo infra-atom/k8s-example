@@ -1,0 +1,65 @@
+replicaCount: 2
+
+image:
+  name: nginx
+  repository: nginx
+  pullPolicy: IfNotPresent
+  tag: "1.27.5-alpine"
+
+labels:
+  app: "app-nginx"
+
+Deployment:
+  strategyType: RollingUpdate
+  maxSurge: 2
+  maxUnavailable: 0
+  TSCMaxSkewZone: 2
+  TSCtopologyKeyZone: topology.kubernetes.io/zone
+  TSCwhenUnsatisfiableZone: DoNotSchedule
+  TSCMaxSkewHostname: 2
+  TSCtopologyKeyHostname: topology.kubernetes.io/hostname
+  TSCwhenUnsatisfiableHostname: DoNotSchedule
+
+
+service:
+  name: service-for-autoscale
+  type: ClusterIP
+  protocol: TCP
+  port: 80
+  targetPort: 80
+
+
+PodDisruptionBudget:
+  PDBpostfix: pdb
+  maxUnavailable: 2
+  minUnavailable:
+
+
+HorizontalPodAutoscaler:
+  name: my-hpa
+  nameTarget: ng-release-deployment
+  minReplicas: 2
+  maxReplicas: 7
+  targetCPUUtilizationPercentage: 20
+
+
+ports:
+  name: http
+  containerPort: 80
+
+
+livenessProbe:
+  path: /_healthz
+  port: 80
+  initialDelaySeconds: 3
+  timeoutSeconds: 2
+  failureThreshold: 2
+
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
